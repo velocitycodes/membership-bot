@@ -7,6 +7,43 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const driveService = new GoogleDriveService(process.env.GOOGLE_DRIVE_CREDENTIALS);
 const ADMIN_ID = parseInt(process.env.ADMIN_ID);
 const cron = require('node-cron');
+const fs = require('fs');
+const path = require('path');
+
+const isVercel = process.env.VERCEL === '1';
+const DB_PATH = isVercel ? path.join('/tmp', 'bot_database.db') : path.join(__dirname, 'bot_database.db');
+const DB_FILE_NAME = 'bot_database.db';
+
+// --- Backup System ---
+
+async function initBackupSystem() {
+    try {
+        if (!fs.existsSync(DB_PATH)) {
+            console.log('Database missing. Searching for backup on Google Drive...');
+            const backupFile = await driveService.findFileByName(DB_FILE_NAME);
+            if (backupFile) {
+                console.log(`Backup found: ${backupFile.id}. Downloading...`);
+                await driveService.downloadFile(backupFile.id, DB_PATH);
+                console.log('Database restored from Google Drive.');
+            } else {
+                console.log('No backup found on Google Drive. Starting with a fresh database.');
+            }
+        }
+    } catch (err) {
+        console.error('Backup restoration failed:', err.message);
+    }
+}
+
+// Scheduled Auto-Backup (Every day at midnight)
+cron.schedule('0 0 * * *', async () => {
+    console.log('Running scheduled database backup...');
+    try {
+        await driveService.uploadFile(DB_PATH, DB_FILE_NAME);
+        console.log('Auto-backup completed successfully.');
+    } catch (err) {
+        console.error('Auto-backup failed:', err.message);
+    }
+});
 
 // Constants
 const PLANS = {
@@ -109,6 +146,18 @@ bot.command('link', async (ctx) => {
     await ctx.reply(`🔗 <b>Generated Deep Link:</b>\n\n<code>${link}</code>\n\n<i>Copy and paste this link into your channel. Ensure there are NO SPACES in the link.</i>`, {
         parse_mode: 'HTML'
     });
+});
+
+// Admin Command: Manual Backup
+bot.command('backup', async (ctx) => {
+    if (ctx.from.id !== ADMIN_ID) return;
+    const msg = await ctx.reply('🔄 Starting manual database backup...');
+    try {
+        await driveService.uploadFile(DB_PATH, DB_FILE_NAME);
+        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ Database backup successful!');
+    } catch (err) {
+        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '❌ Backup failed: ' + err.message);
+    }
 });
 
 const showMembershipPlans = async (ctx) => {
@@ -337,12 +386,14 @@ ${fileInfo.name}
     }
 };
 
-// Export bot for Vercel
-module.exports = bot;
+// Export for Vercel
+module.exports = { bot, initBackupSystem };
 
-// Start polling only if run directly (local development)
-if (require.main === module) {
-    bot.launch().then(() => console.log('Bot is running in polling mode (local)...'));
+// Start polling only if run directly and NOT on Vercel
+if (require.main === module && !isVercel) {
+    initBackupSystem().then(() => {
+        bot.launch().then(() => console.log('Bot is running in polling mode (local)...'));
+    });
 }
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
