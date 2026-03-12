@@ -1,0 +1,23 @@
+{
+  "name": "video-sender-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "build": "echo 'No build required for this project'",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.3.1",
+    "googleapis": "^171.4.0",
+    "node-cron": "^4.2.1",
+    "qrcode": "^1.5.4",
+    "telegraf": "^4.16.3"
+  }
+}
