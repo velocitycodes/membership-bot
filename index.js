@@ -9,10 +9,20 @@ const ADMIN_ID = parseInt(process.env.ADMIN_ID);
 const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 
 const isVercel = process.env.VERCEL === '1';
-const DB_PATH = isVercel ? path.join('/tmp', 'bot_database.db') : path.join(__dirname, 'bot_database.db');
+const isRender = !!process.env.RENDER;
+const DB_PATH = (isVercel || isRender) ? path.join('/tmp', 'bot_database.db') : path.join(__dirname, 'bot_database.db');
 const DB_FILE_NAME = 'bot_database.db';
+
+// --- Global Error Handlers ---
+process.on('uncaughtException', (err) => {
+    console.error('CRITICAL: Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 // --- Backup System ---
 
@@ -157,6 +167,24 @@ bot.command('backup', async (ctx) => {
         await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ Database backup successful!');
     } catch (err) {
         await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '❌ Backup failed: ' + err.message);
+    }
+});
+
+// Admin Command: Set Webhook (for Vercel)
+bot.command('setwebhook', async (ctx) => {
+    if (ctx.from.id !== ADMIN_ID) return;
+    
+    const parts = ctx.message.text.split(' ');
+    if (parts.length < 2) {
+        return ctx.reply('❌ <b>Usage:</b> /setwebhook &lt;vercel_url&gt;\nExample: <code>/setwebhook https://your-project.vercel.app</code>', { parse_mode: 'HTML' });
+    }
+
+    const url = parts[1].replace(/\/$/, '') + '/api';
+    try {
+        await bot.telegram.setWebhook(url);
+        await ctx.reply(`✅ <b>Webhook Set Successfully!</b>\n\nURL: <code>${url}</code>`, { parse_mode: 'HTML' });
+    } catch (err) {
+        await ctx.reply(`❌ <b>Failed to set Webhook:</b>\n${err.message}`, { parse_mode: 'HTML' });
     }
 });
 
@@ -389,11 +417,37 @@ ${fileInfo.name}
 // Export for Vercel
 module.exports = { bot, initBackupSystem };
 
-// Start polling only if run directly and NOT on Vercel
+// Start polling and HTTP server if run directly and NOT on Vercel
 if (require.main === module && !isVercel) {
-    initBackupSystem().then(() => {
-        bot.launch().then(() => console.log('Bot is running in polling mode (local)...'));
+    // Simple HTTP server for health checks (Render/UptimeRobot)
+    const server = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('Bot is running and healthy!\n');
     });
+
+    const PORT = process.env.PORT || 3000;
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`Health check server listening on port ${PORT} (0.0.0.0)`);
+    }).on('error', (err) => {
+        console.error('HTTP Server Error:', err.message);
+    });
+
+    // Keep-alive logging
+    setInterval(() => {
+        console.log(`[Keep-Alive] Bot is still active at ${new Date().toISOString()}`);
+    }, 300000); // Every 5 minutes
+
+    initBackupSystem()
+        .then(() => {
+            console.log('Database system initialized.');
+            return bot.launch();
+        })
+        .then(() => {
+            console.log('Bot is running in polling mode...');
+        })
+        .catch((err) => {
+            console.error('Failed to start bot:', err.message);
+        });
 }
 
 process.once('SIGINT', () => bot.stop('SIGINT'));

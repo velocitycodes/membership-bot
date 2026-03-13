@@ -2,7 +2,8 @@ const Database = require('better-sqlite3');
 const path = require('path');
 
 const isVercel = process.env.VERCEL === '1';
-const DB_PATH = isVercel ? path.join('/tmp', 'bot_database.db') : path.join(__dirname, 'bot_database.db');
+const isRender = !!process.env.RENDER;
+const DB_PATH = (isVercel || isRender) ? path.join('/tmp', 'bot_database.db') : path.join(__dirname, 'bot_database.db');
 
 const db = new Database(DB_PATH);
 
